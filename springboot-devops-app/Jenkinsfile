@@ -9,7 +9,7 @@ pipeline {
 
     environment {
 
-        IMAGE = "gopikrishnachodapaneedi/springboot-demo"
+        IMAGE = "gopikrishnachodapaneedi/springboot-devops-app"
 
         SCANNER_HOME = tool 'SonarScanner'
     }
@@ -24,7 +24,7 @@ pipeline {
 
         stage('Build') {
             steps {
-                dir('springboot-demo') {
+                dir('springboot-devops-app') {
                     sh 'mvn clean package -DskipTests'
                 }
             }
@@ -58,7 +58,7 @@ pipeline {
         stage('Docker Build') {
             steps {
 
-                dir('springboot-demo') {
+                dir('springboot-devops-app') {
 
                     sh """
                     docker build -t ${IMAGE}:${BUILD_NUMBER} .
@@ -89,7 +89,7 @@ pipeline {
             steps {
 
                 sh '''
-                docker push gopikrishnachodapaneedi/springboot-demo:latest
+                docker push gopikrishnachodapaneedi/springboot-devops-app:latest
                 '''
             }
         }
@@ -99,7 +99,7 @@ pipeline {
             steps {
 
                 sh '''
-                sed -i "s|image:.*|image: gopikrishnachodapaneedi/springboot-demo:${BUILD_NUMBER}|g" k8s-manifests/deployment.yaml
+                sed -i "s|image:.*|image: gopikrishnachodapaneedi/springboot-devops-app:${BUILD_NUMBER}|g" k8s-manifests/deployment.yaml
                 '''
             }
         }
