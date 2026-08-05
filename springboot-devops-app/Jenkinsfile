@@ -32,7 +32,7 @@ pipeline {
 
         stage('SonarQube') {
             steps {
-                dir('springboot-demo') {
+                dir('springboot-devops-app') {
 
                     withSonarQubeEnv('SonarQube') {
 
