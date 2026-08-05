@@ -21,7 +21,7 @@ spec:
 
       - name: springboot-demo
 
-        image: gopikrishnachodapaneedi/springboot-devops-app:12
+        image: gopikrishnachodapaneedi/springboot-devops-app:13
 
         ports:
         - containerPort: 8080
