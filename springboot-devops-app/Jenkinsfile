@@ -1,87 +1,44 @@
 pipeline {
+
     agent any
 
     tools {
-        jdk 'JDK20'
+        jdk 'JDK21'
         maven 'Maven'
     }
 
     environment {
-        APP_NAME = "springboot-devops-app"
-        DOCKERHUB_USER = "gopikrishnachodapaneedi"
-        IMAGE = "${DOCKERHUB_USER}/${APP_NAME}"
+
+        IMAGE = "gopikrishnachodapaneedi/springboot-demo"
+
         SCANNER_HOME = tool 'SonarScanner'
     }
 
     stages {
 
-        stage('Checkout Source') {
+        stage('Checkout') {
             steps {
                 checkout scm
             }
         }
 
-        stage('Verify Java & Maven') {
+        stage('Build') {
             steps {
-                script {
-                    env.JAVA_HOME = tool 'JDK20'
-                    env.PATH = "${env.JAVA_HOME}/bin:${env.PATH}"
-                }
-
-                sh '''
-                echo "========== JAVA =========="
-                echo "JAVA_HOME=$JAVA_HOME"
-                which java
-                java -version
-
-                echo
-                echo "========== JAVAC =========="
-                which javac
-                javac -version
-
-                echo
-                echo "========== MAVEN =========="
-                which mvn
-                mvn -version
-
-                echo
-                pwd
-                ls -R
-                '''
-            }
-        }
-
-        stage('Build Application') {
-            steps {
-                dir('springboot-devops-app') {
-
-                    script {
-                        env.JAVA_HOME = tool 'JDK20'
-                        env.PATH = "${env.JAVA_HOME}/bin:${env.PATH}"
-                    }
-
-                    sh '''
-                    mvn clean package -DskipTests
-                    '''
+                dir('springboot-demo') {
+                    sh 'mvn clean package -DskipTests'
                 }
             }
         }
 
-        stage('SonarQube Analysis') {
+        stage('SonarQube') {
             steps {
-                dir('springboot-devops-app') {
-
-                    script {
-                        env.JAVA_HOME = tool 'JDK20'
-                        env.PATH = "${env.JAVA_HOME}/bin:${env.PATH}"
-                    }
+                dir('springboot-demo') {
 
                     withSonarQubeEnv('SonarQube') {
 
                         sh """
                         ${SCANNER_HOME}/bin/sonar-scanner \
-                        -Dsonar.projectKey=springboot-devops-app \
-                        -Dsonar.projectName=springboot-devops-app \
+                        -Dsonar.projectKey=springboot-demo \
                         -Dsonar.sources=src \
                         -Dsonar.java.binaries=target/classes
                         """
@@ -92,101 +49,82 @@ pipeline {
 
         stage('Quality Gate') {
             steps {
-                timeout(time: 5, unit: 'MINUTES') {
-                    waitForQualityGate abortPipeline: true
+                timeout(time:5, unit:'MINUTES') {
+                    waitForQualityGate abortPipeline:true
                 }
             }
         }
 
-        stage('Build Docker Image') {
+        stage('Docker Build') {
             steps {
-                dir('springboot-devops-app') {
+
+                dir('springboot-demo') {
+
                     sh """
-                    docker build \
-                    -t ${IMAGE}:${BUILD_NUMBER} \
-                    -t ${IMAGE}:latest .
+                    docker build -t ${IMAGE}:${BUILD_NUMBER} .
+                    docker tag ${IMAGE}:${BUILD_NUMBER} ${IMAGE}:latest
                     """
                 }
             }
         }
 
         stage('Docker Login') {
+
             steps {
-                withCredentials([
-                    usernamePassword(
-                        credentialsId: 'dockerhub-creds',
-                        usernameVariable: 'DOCKER_USER',
-                        passwordVariable: 'DOCKER_PASS'
-                    )
-                ]) {
+
+                withCredentials([usernamePassword(
+                credentialsId:'dockerhub-creds',
+                usernameVariable:'USER',
+                passwordVariable:'PASS')]) {
 
                     sh '''
-                    echo "$DOCKER_PASS" | docker login \
-                    -u "$DOCKER_USER" \
-                    --password-stdin
+                    echo $PASS | docker login -u $USER --password-stdin
                     '''
                 }
             }
         }
 
-        stage('Push Docker Image') {
+        stage('Docker Push') {
+
             steps {
-                sh """
-                docker push ${IMAGE}:${BUILD_NUMBER}
-                docker push ${IMAGE}:latest
-                """
+
+                sh '''
+                docker push gopikrishnachodapaneedi/springboot-demo:latest
+                '''
             }
         }
 
-        stage('Update Kubernetes Manifest') {
-            steps {
-                dir('k8s-manifests') {
+        stage('Update Manifest') {
 
-                    sh """
-                    sed -i 's#image:.*#image: ${IMAGE}:${BUILD_NUMBER}#' deployment.yaml
-                    """
+            steps {
+
+                sh '''
+                sed -i "s|image:.*|image: gopikrishnachodapaneedi/springboot-demo:${BUILD_NUMBER}|g" k8s-manifests/deployment.yaml
+                '''
+            }
+        }
+
+        stage('Git Push') {
+
+            steps {
+
+                withCredentials([usernamePassword(
+                credentialsId:'github-creds',
+                usernameVariable:'USER',
+                passwordVariable:'TOKEN')]) {
 
                     sh '''
-                    git config user.name "Jenkins"
                     git config user.email "jenkins@local"
+                    git config user.name "Jenkins"
 
-                    git add deployment.yaml
+                    git add .
+
                     git commit -m "Updated image ${BUILD_NUMBER}" || true
+
+                    git push https://${USER}:${TOKEN}@github.com/gopikrishnac/Devops2.git HEAD:main
                     '''
                 }
             }
-        }
-
-        stage('Push Manifest') {
-            steps {
-                withCredentials([
-                    usernamePassword(
-                        credentialsId: 'github-creds',
-                        usernameVariable: 'GIT_USER',
-                        passwordVariable: 'GIT_PASS'
-                    )
-                ]) {
-
-                    sh '''
-                    git remote set-url origin https://${GIT_USER}:${GIT_PASS}@github.com/gopikrishnac/Devops2.git
-                    git push origin main
-                    '''
-                }
-            }
-        }
-    }
-
-    post {
-        success {
-            echo "===================================="
-            echo "Pipeline Completed Successfully"
-            echo "===================================="
-        }
-
-        failure {
-            echo "===================================="
-            echo "Pipeline Failed"
-            echo "===================================="
         }
     }
 }
