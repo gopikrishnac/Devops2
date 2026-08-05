@@ -8,13 +8,17 @@ pipeline {
     }
 
     environment {
-
         IMAGE = "gopikrishnachodapaneedi/springboot-devops-app"
-
         SCANNER_HOME = tool 'SonarScanner'
     }
 
     stages {
+
+        stage('Clean Workspace') {
+            steps {
+                deleteDir()
+            }
+        }
 
         stage('Checkout') {
             steps {
@@ -30,15 +34,14 @@ pipeline {
             }
         }
 
-        stage('SonarQube') {
+        stage('SonarQube Scan') {
             steps {
                 dir('springboot-devops-app') {
-
                     withSonarQubeEnv('SonarQube') {
-
                         sh """
                         ${SCANNER_HOME}/bin/sonar-scanner \
                         -Dsonar.projectKey=springboot-demo \
+                        -Dsonar.projectName=springboot-demo \
                         -Dsonar.sources=src \
                         -Dsonar.java.binaries=target/classes
                         """
@@ -49,17 +52,15 @@ pipeline {
 
         stage('Quality Gate') {
             steps {
-                timeout(time:5, unit:'MINUTES') {
-                    waitForQualityGate abortPipeline:true
+                timeout(time: 5, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: true
                 }
             }
         }
 
         stage('Docker Build') {
             steps {
-
                 dir('springboot-devops-app') {
-
                     sh """
                     docker build -t ${IMAGE}:${BUILD_NUMBER} .
                     docker tag ${IMAGE}:${BUILD_NUMBER} ${IMAGE}:latest
@@ -69,62 +70,77 @@ pipeline {
         }
 
         stage('Docker Login') {
-
             steps {
-
                 withCredentials([usernamePassword(
-                credentialsId:'dockerhub-creds',
-                usernameVariable:'USER',
-                passwordVariable:'PASS')]) {
+                    credentialsId: 'dockerhub-creds',
+                    usernameVariable: 'DOCKER_USER',
+                    passwordVariable: 'DOCKER_PASS')]) {
 
                     sh '''
-                    echo $PASS | docker login -u $USER --password-stdin
+                    echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
                     '''
                 }
             }
         }
 
         stage('Docker Push') {
-
             steps {
-
-                sh '''
-                docker push gopikrishnachodapaneedi/springboot-devops-app:latest
-                '''
+                sh """
+                docker push ${IMAGE}:${BUILD_NUMBER}
+                docker push ${IMAGE}:latest
+                """
             }
         }
 
-        stage('Update Manifest') {
-
+        stage('Update Kubernetes Manifest') {
             steps {
+                sh """
+                sed -i 's#image:.*#image: ${IMAGE}:${BUILD_NUMBER}#' k8s-manifests/deployment.yaml
+                """
 
-                sh '''
-                sed -i "s|image:.*|image: gopikrishnachodapaneedi/springboot-devops-app:${BUILD_NUMBER}|g" k8s-manifests/deployment.yaml
-                '''
+                sh "cat k8s-manifests/deployment.yaml"
             }
         }
 
-        stage('Git Push') {
-
+        stage('Push Manifest to GitHub') {
             steps {
-
                 withCredentials([usernamePassword(
-                credentialsId:'github-creds',
-                usernameVariable:'USER',
-                passwordVariable:'TOKEN')]) {
+                    credentialsId: 'github-creds',
+                    usernameVariable: 'GIT_USER',
+                    passwordVariable: 'GIT_TOKEN')]) {
 
-                    sh '''
+                    sh """
                     git config user.email "jenkins@local"
                     git config user.name "Jenkins"
 
-                    git add .
+                    git add k8s-manifests/deployment.yaml
 
-                    git commit -m "Updated image ${BUILD_NUMBER}" || true
+                    git commit -m "Update image to build ${BUILD_NUMBER}" || true
 
-                    git push https://${USER}:${TOKEN}@github.com/gopikrishnac/Devops2.git HEAD:main
-                    '''
+                    git push https://${GIT_USER}:${GIT_TOKEN}@github.com/gopikrishnac/Devops2.git HEAD:main
+                    """
                 }
             }
+        }
+    }
+
+    post {
+
+        success {
+            echo "========================================"
+            echo "Pipeline Completed Successfully"
+            echo "Docker Image : ${IMAGE}:${BUILD_NUMBER}"
+            echo "========================================"
+        }
+
+        failure {
+            echo "========================================"
+            echo "Pipeline Failed"
+            echo "========================================"
+        }
+
+        always {
+            cleanWs()
         }
     }
 }
