@@ -1,1 +1,175 @@
 // Replace this placeholder with your full Jenkins pipeline.
+pipeline {
+    agent any
+
+    tools {
+        jdk 'JDK20'
+        maven 'Maven'
+    }
+
+    environment {
+        APP_NAME = "springboot-devops-app"
+        DOCKERHUB_USER = "gopikrishnachodapaneedi"
+        IMAGE = "${DOCKERHUB_USER}/${APP_NAME}"
+        SCANNER_HOME = tool 'SonarScanner'
+    }
+
+    stages {
+
+        stage('Checkout Source') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Verify Environment') {
+            steps {
+                sh '''
+                echo "Current Directory"
+                pwd
+
+                echo "Java Version"
+                java -version
+
+                echo "Maven Version"
+                mvn -version
+
+                ls -la
+                '''
+            }
+        }
+
+        stage('Build Application') {
+            steps {
+                dir('springboot-devops-app') {
+                    sh '''
+                    mvn clean package -DskipTests
+                    '''
+                }
+            }
+        }
+
+        stage('SonarQube Analysis') {
+            steps {
+                dir('springboot-devops-app') {
+                    withSonarQubeEnv('SonarQube') {
+
+                        sh """
+                        ${SCANNER_HOME}/bin/sonar-scanner \
+                        -Dsonar.projectKey=springboot-devops-app \
+                        -Dsonar.projectName=springboot-devops-app \
+                        -Dsonar.sources=src \
+                        -Dsonar.java.binaries=target/classes
+                        """
+                    }
+                }
+            }
+        }
+
+        stage('Quality Gate') {
+            steps {
+                timeout(time: 5, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: true
+                }
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                dir('springboot-devops-app') {
+
+                    sh """
+                    docker build \
+                    -t ${IMAGE}:${BUILD_NUMBER} \
+                    -t ${IMAGE}:latest .
+                    """
+                }
+            }
+        }
+
+        stage('Docker Login') {
+            steps {
+
+                withCredentials([usernamePassword(
+                        credentialsId: 'dockerhub-creds',
+                        usernameVariable: 'DOCKER_USER',
+                        passwordVariable: 'DOCKER_PASS')]) {
+
+                    sh '''
+                    echo "$DOCKER_PASS" | docker login \
+                    -u "$DOCKER_USER" \
+                    --password-stdin
+                    '''
+                }
+            }
+        }
+
+        stage('Push Docker Image') {
+            steps {
+
+                sh """
+                docker push ${IMAGE}:${BUILD_NUMBER}
+                docker push ${IMAGE}:latest
+                """
+            }
+        }
+
+        stage('Update Kubernetes Manifest') {
+            steps {
+
+                dir('k8s-manifests') {
+
+                    sh """
+                    sed -i 's#image:.*#image: ${IMAGE}:${BUILD_NUMBER}#' deployment.yaml
+                    """
+
+                    sh '''
+                    git config user.name "Jenkins"
+                    git config user.email "jenkins@local"
+
+                    git add deployment.yaml
+
+                    git commit -m "Updated Docker image ${BUILD_NUMBER}" || true
+                    '''
+                }
+            }
+        }
+
+        stage('Push Manifest to GitHub') {
+
+            steps {
+
+                withCredentials([usernamePassword(
+                        credentialsId: 'github-creds',
+                        usernameVariable: 'GIT_USER',
+                        passwordVariable: 'GIT_PASS')]) {
+
+                    sh '''
+                    git remote set-url origin https://$GIT_USER:$GIT_PASS@github.com/gopikrishnac/Devops2.git
+
+                    git push origin main
+                    '''
+                }
+            }
+        }
+    }
+
+    post {
+
+        success {
+
+            echo "====================================="
+            echo "Pipeline Completed Successfully"
+            echo "====================================="
+
+        }
+
+        failure {
+
+            echo "====================================="
+            echo "Pipeline Failed"
+            echo "====================================="
+
+        }
+    }
+}
