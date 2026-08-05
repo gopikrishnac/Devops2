@@ -5,17 +5,18 @@
 
     <modelVersion>4.0.0</modelVersion>
 
-    <groupId>com.example</groupId>
-    <artifactId>springboot-demo</artifactId>
-    <version>1.0</version>
-    <packaging>jar</packaging>
-
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
         <version>3.5.4</version>
         <relativePath/>
     </parent>
+
+    <groupId>com.example</groupId>
+    <artifactId>springboot-demo</artifactId>
+    <version>1.0</version>
+    <name>springboot-demo</name>
+    <packaging>jar</packaging>
 
     <properties>
         <java.version>21</java.version>
@@ -42,13 +43,6 @@
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
-                <executions>
-                    <execution>
-                        <goals>
-                            <goal>repackage</goal>
-                        </goals>
-                    </execution>
-                </executions>
             </plugin>
 
         </plugins>
